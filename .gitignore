@@ -1,4 +1,4 @@
-/GUI/temperature*
+/GUI/temperature_log*
 /GUI/venv
 /DS18B20_CMSIS_1/DebugConfig
 /DS18B20_CMSIS_1/Listings
