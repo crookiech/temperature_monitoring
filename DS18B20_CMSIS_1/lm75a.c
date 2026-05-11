@@ -198,3 +198,35 @@ uint8_t LM75A_ReadTemperature(uint8_t addr, float *temp) {
     
     return 1;
 }
+
+void LM75A_SetTos(uint8_t addr, float tos) {
+    uint8_t write_buf[2];
+    uint8_t tos_byte = (uint8_t)(tos * 2);
+    
+    write_buf[0] = LM75B_Tos;
+    write_buf[1] = tos_byte;
+    I2C_WriteData(addr, write_buf, 2);
+}
+
+void LM75A_SetThyst(uint8_t addr, float thyst) {
+    uint8_t write_buf[2];
+    uint8_t thyst_byte = (uint8_t)(thyst * 2);
+    
+    write_buf[0] = LM75B_Thyst;
+    write_buf[1] = thyst_byte;
+    I2C_WriteData(addr, write_buf, 2);
+}
+
+float LM75A_GetTos(uint8_t addr) {
+    uint8_t read_buf[2];
+    I2C_ReadData(addr, read_buf, 2);
+    return (float)((read_buf[0] << 8) | read_buf[1]) / 256.0f;
+}
+
+float LM75A_GetThyst(uint8_t addr) {
+    uint8_t read_buf[2];
+    uint8_t reg = LM75B_Thyst;
+    I2C_WriteData(addr, &reg, 1);
+    I2C_ReadData(addr, read_buf, 2);
+    return (float)((read_buf[0] << 8) | read_buf[1]) / 256.0f;
+}

@@ -43,5 +43,8 @@ void SystemCoreClockConfigure(void);
 float GetLM75ATemperature(void);
 void UpdateLEDByTemperature(float max_temp);
 void Delay(uint32_t dlyTicks); 
+void ParseAndSetDS18B20Config(char *params);
+void ParseAndSetLM75AConfig(char *params);
+void SendAllConfigs(void);
 
 #endif /* MAIN_H */

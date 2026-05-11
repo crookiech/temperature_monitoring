@@ -1,4 +1,5 @@
 #include "main.h"
+#include <stdlib.h>
 
 Sensor sensors[MAX_SENSORS];
 Sensor previousSensors[MAX_SENSORS];
@@ -322,10 +323,111 @@ void SendTemperatureData(void) {
 void ProcessReceivedString(void) {
     if (strcmp((char*)received_string, "status") == 0) {
         SendTemperatureData();
+    } else if (strcmp((char*)received_string, "get_configs") == 0) {
+        SendAllConfigs();
+    } else if (strncmp((char*)received_string, "set_ds18b20,", 12) == 0) {
+        ParseAndSetDS18B20Config((char*)received_string + 12);
+    } else if (strncmp((char*)received_string, "set_lm75a,", 10) == 0) {
+        ParseAndSetLM75AConfig((char*)received_string + 10);
     } else if (strcmp((char*)received_string, "help") == 0) {
         USART_SendString("\r\nCommands:\r\n");
-        USART_SendString("  status - Show all temperatures\r\n");
-        USART_SendString("  help   - Show this help\r\n");
+        USART_SendString("  status       - Show all temperatures\r\n");
+        USART_SendString("  get_configs  - Get sensor configurations\r\n");
+        USART_SendString("  set_ds18b20,ROM,TL,TH,RES - Set DS18B20 config\r\n");
+        USART_SendString("  set_lm75a,ADDR,TOS,THYST - Set LM75A config\r\n");
+        USART_SendString("  help         - Show this help\r\n");
+    }
+}
+
+void ParseAndSetDS18B20Config(char *params) {
+    char rom_str[17] = {0};
+    float tl, th;
+    int resolution;
+    uint8_t rom_code[8];
+    uint8_t tl_byte, th_byte, res_byte;
+    char *token = strtok(params, ",");
+    if(token) strcpy(rom_str, token);
+    token = strtok(NULL, ",");
+    if(token) tl = atof(token);
+    token = strtok(NULL, ",");
+    if(token) th = atof(token);
+    token = strtok(NULL, ",");
+    if(token) resolution = atoi(token);
+    for(int i = 0; i < 8; i++) {
+        char byte_str[3] = {rom_str[i*2], rom_str[i*2+1], 0};
+        rom_code[i] = (uint8_t)strtol(byte_str, NULL, 16);
+    }
+    tl_byte = (uint8_t)(tl);
+    th_byte = (uint8_t)(th);
+    switch(resolution) {
+        case 9:  res_byte = RESOLUTION_9BIT; break;
+        case 10: res_byte = RESOLUTION_10BIT; break;
+        case 11: res_byte = RESOLUTION_11BIT; break;
+        default: res_byte = RESOLUTION_12BIT; break;
+    }
+    for(uint8_t i = 0; i < actualSensorCount; i++) {
+        if(CompareROMCodes(sensors[i].ROM_code, rom_code)) {
+            ds18b20_SetConfig(1, sensors[i].ROM_code, th_byte, tl_byte, res_byte);
+            ds18b20_CopyScratchpad(1, sensors[i].ROM_code);
+            USART_SendString("\r\nCONFIG_OK: DS18B20\r\n");
+            return;
+        }
+    }
+    USART_SendString("\r\nCONFIG_ERROR: DS18B20 not found\r\n");
+}
+
+void ParseAndSetLM75AConfig(char *params) {
+    uint8_t address;
+    float tos, thyst;
+    uint8_t tos_byte, thyst_byte;
+    char *token = strtok(params, ",");
+    if(token) address = (uint8_t)strtol(token, NULL, 16);
+    token = strtok(NULL, ",");
+    if(token) tos = atof(token);
+    token = strtok(NULL, ",");
+    if(token) thyst = atof(token);
+    tos_byte = (uint8_t)(tos * 2);
+    thyst_byte = (uint8_t)(thyst * 2);
+    uint8_t write_buf[2];
+    write_buf[0] = LM75B_Tos;
+    write_buf[1] = tos_byte;
+    I2C_WriteData(address, write_buf, 2);
+    write_buf[0] = LM75B_Thyst;
+    write_buf[1] = thyst_byte;
+    I2C_WriteData(address, write_buf, 2);
+    USART_SendString("\r\nCONFIG_OK: LM75A\r\n");
+}
+
+void SendAllConfigs(void) {
+    for(uint8_t i = 0; i < actualSensorCount; i++) {
+        uint8_t th, tl, config;
+        ds18b20_ReadConfig(1, sensors[i].ROM_code, &th, &tl, &config);
+        char buf[64];
+        sprintf(buf, "\r\nDS18B20_CONFIG,");
+        USART_SendString(buf);
+        char rom_str[17];
+        for(int j = 0; j < 8; j++) {
+            sprintf(buf, "%02X", sensors[i].ROM_code[j]);
+            USART_SendString(buf);
+        }
+        int resolution = 12;
+        if(config == RESOLUTION_9BIT) resolution = 9;
+        else if(config == RESOLUTION_10BIT) resolution = 10;
+        else if(config == RESOLUTION_11BIT) resolution = 11;
+        
+        sprintf(buf, ",%.1f,%.1f,%d\r\n", (float)tl, (float)th, resolution);
+        USART_SendString(buf);
+    }
+    if(lm75a_sensor.present) {
+        uint8_t read_buf[2];
+        uint8_t tos, thyst;
+        I2C_ReadData(lm75a_sensor.address, read_buf, 2);
+        char buf[64];
+        sprintf(buf, "\r\nLM75A_CONFIG,%02X,%.1f,%.1f\r\n", 
+                lm75a_sensor.address, 
+                (float)lm75a_sensor.temp, 
+                (float)lm75a_sensor.temp);
+        USART_SendString(buf);
     }
 }
 
@@ -336,33 +438,26 @@ int main(void) {
     uint32_t lastLM75ARead = 0;
     float max_temperature = 0.0f;
     unsigned char received_byte;
-    
     SystemCoreClockConfigure();
     SystemCoreClockUpdate();
     SysTick_Config(SystemCoreClock / 1000000);
-    
     ds18b20_PortInit();
     I2C_Init();
     LED_Init();
     USART_Init();
-    
     while (ds18b20_Reset());
     Init_Sensors();
-    
     actualSensorCount = Search_ROM(SEARCH_ROM, sensors);
     SaveCurrentSensorState();
-    
     USART_SendString("\r\n=== SYSTEM START ===\r\n");
     USART_SendString("Found ");
     char count_str[4];
     sprintf(count_str, "%d", actualSensorCount);
     USART_SendString(count_str);
     USART_SendString(" DS18B20 sensors\r\n");
-    
     for (i = 0; i < actualSensorCount; i++) {
         ds18b20_Init(1, sensors[i].ROM_code, 0x1E, 0xE2, RESOLUTION_12BIT);
     }
-    
     lm75a_sensor.address = LM75A_CheckAnyDevice();
     if(lm75a_sensor.address != 0) {
         lm75a_sensor.present = 1;
@@ -374,16 +469,13 @@ int main(void) {
         lm75a_sensor.present = 0;
         USART_SendString("LM75A sensor not found\r\n");
     }
-    
     for (i = 0; i < actualSensorCount; i++) {
         StartTemperatureConversion(i);
     }
-    
     lastSensorRead = msTicks;
     lastSensorCheck = msTicks;
     lastDataSend = msTicks;
     lastLM75ARead = msTicks;
-    
     while (1) {
         if (USART2->SR & USART_SR_RXNE) {
             received_byte = USART_ReceiveByte();
@@ -410,7 +502,6 @@ int main(void) {
                 }
             }
         }
-        
         if (msTicks - lastSensorCheck > SENSOR_CHECK_INTERVAL) {
             lastSensorCheck = msTicks;
             
@@ -421,11 +512,9 @@ int main(void) {
                 lastSensorRead = msTicks;
             }
         }
-        
         if (msTicks - lastSensorRead > TEMP_READ_INTERVAL) {
             lastSensorRead = msTicks;
             max_temperature = 0.0f;
-            
             for (i = 0; i < actualSensorCount; i++) {
                 if (ReadTemperatureFromSensor(i)) {
                     if (sensors[i].temp > max_temperature) {
@@ -437,12 +526,10 @@ int main(void) {
                     sensors[i].crc8_data_error = 1;
                 }
             }
-            
             for (i = 0; i < actualSensorCount; i++) {
                 StartTemperatureConversion(i);
             }
         }
-        
         if (msTicks - lastLM75ARead > 500000) {
             lastLM75ARead = msTicks;
             if(lm75a_sensor.present) {
@@ -459,14 +546,12 @@ int main(void) {
                 }
             }
         }
-        
         UpdateLEDByTemperature(max_temperature);
         
         if (msTicks - lastDataSend > 5000000) {
             lastDataSend = msTicks;
             SendTemperatureData();
         }
-        
         Delay(10);
     }
 }
