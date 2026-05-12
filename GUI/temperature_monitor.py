@@ -645,15 +645,21 @@ class MainWindow(QMainWindow):
     def update_lm75a_group_title(self):
         count = sum(1 for s in self.sensors.values() if s.sensor_type == "LM75A")
         self.lm75a_group.setTitle(f"LM75A (подключено: {count})")
-        
+
     def format_temperature(self, temp):
         sign = '+' if temp >= 0 else '-'
         abs_temp = abs(temp)
         integer_part = int(abs_temp)
-        fractional_part = int(round((abs_temp - integer_part) * 100))
-        if fractional_part >= 100:
-            fractional_part = 99
-        return f"{sign}{integer_part:02d}.{fractional_part:02d}"
+        integer_str = str(integer_part)
+        fractional_digits = 6 - len(integer_str)
+        if fractional_digits < 0:
+            fractional_digits = 0
+        multiplier = 10 ** fractional_digits
+        fractional_part = int(round((abs_temp - integer_part) * multiplier))
+        if fractional_part >= multiplier:
+            fractional_part = multiplier - 1
+        fractional_str = f"{fractional_part:0{fractional_digits}d}"
+        return f"{sign}{integer_str}.{fractional_str}"
         
     def add_ds18b20_measurement(self, sensor_id, temperature, timestamp, sensor, display_id):
         measurement = {
