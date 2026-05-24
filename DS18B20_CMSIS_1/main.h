@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MAX_SENSORS 4
+#define MAX_SENSORS 32
 #define SENSOR_CHECK_INTERVAL 500000
 #define TEMP_READ_INTERVAL 800000
 #define TEMP_THRESHOLD 29.0f
@@ -35,6 +35,7 @@ void USART_Init(void);
 void USART_SendByte(unsigned char data);
 void USART_SendString(const char* str);
 unsigned char USART_ReceiveByte(void);
+static void USART_SendChar(char c);
 void ProcessReceivedString(void);
 void SendTemperatureData(void);
 void SendROMCode(const uint8_t* rom_code);
@@ -42,9 +43,6 @@ int CompareROMCodes(const uint8_t* rom1, const uint8_t* rom2);
 void SystemCoreClockConfigure(void);
 float GetLM75ATemperature(void);
 void UpdateLEDByTemperature(float max_temp);
-void Delay(uint32_t dlyTicks); 
-void ParseAndSetDS18B20Config(char *params);
-void ParseAndSetLM75AConfig(char *params);
-void SendAllConfigs(void);
+void Delay(uint32_t dlyTicks);
 
-#endif /* MAIN_H */
+#endif

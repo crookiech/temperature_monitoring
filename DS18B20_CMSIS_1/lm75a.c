@@ -1,7 +1,10 @@
 #include "lm75a.h"
 
+#define I2C_TIMEOUT 50000
+
 extern volatile uint32_t msTicks;
-extern volatile uint32_t error_counter;
+volatile uint32_t error_counter;
+volatile uint32_t i2c_timeout_counter = 0;
 
 #define _RCC_I2C1_CLK_ENABLE()   do { \
     __IO uint32_t tmpreg; \
@@ -27,6 +30,17 @@ extern volatile uint32_t error_counter;
 void Delay_US(uint32_t us) {
     uint32_t start = msTicks;
     while ((msTicks - start) < us) { __NOP(); }
+}
+
+uint8_t I2C_WaitForFlag(uint32_t flag, uint32_t timeout) {
+    uint32_t timeout_cnt = timeout;
+    while(!(I2C1->SR1 & flag)) {
+        timeout_cnt--;
+        if(timeout_cnt == 0) {
+            return 0; // Timeout
+        }
+    }
+    return 1;
 }
 
 void I2C_Init(void) {
@@ -55,6 +69,21 @@ void I2C_Init(void) {
     SET_BIT(I2C1->CR1, I2C_CR1_PE);
 }
 
+
+uint32_t Get_APB1_FREQ() {
+    uint32_t freq = 0;
+    uint32_t tmp = (RCC->CFGR & RCC_CFGR_PPRE1) >> 8;
+    
+    switch(tmp) {
+        case 0x04: freq = SystemCoreClock / 2; break;
+        case 0x05: freq = SystemCoreClock / 4; break;
+        case 0x06: freq = SystemCoreClock / 8; break;
+        case 0x07: freq = SystemCoreClock / 16; break;
+        default: freq = SystemCoreClock; break;
+    }
+    return freq;
+}
+
 void I2C_Reset(void) {
     CLEAR_BIT(I2C1->CR1, I2C_CR1_PE);
     SET_BIT(I2C1->CR1, I2C_CR1_SWRST);
@@ -69,72 +98,143 @@ void I2C_Reset(void) {
     SET_BIT(I2C1->CR1, I2C_CR1_PE);
 }
 
-void I2C_WriteData(uint8_t addr, uint8_t *buf, uint16_t bytes_count) {
+uint8_t I2C_WriteData(uint8_t addr, uint8_t *buf, uint16_t bytes_count) {
     uint16_t i;
+    uint32_t timeout;
+    
     CLEAR_BIT(I2C1->CR1, I2C_CR1_POS);
     SET_BIT(I2C1->CR1, I2C_CR1_ACK);
     SET_BIT(I2C1->CR1, I2C_CR1_START);
     
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_SB));
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_SB) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     (void) I2C1->SR1;
     
     I2C1->DR = SLAVE_OWN_ADDRESS | I2C_REQUEST_WRITE;
     
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR));
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     (void) I2C1->SR1;
     (void) I2C1->SR2;
     
     I2C1->DR = addr;
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_TXE)){}
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_TXE) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     
     for(i = 0; i < bytes_count; i++) {
         I2C1->DR = buf[i];
-        while(!READ_BIT(I2C1->SR1, I2C_SR1_TXE)){}
+        timeout = I2C_TIMEOUT;
+        while(!READ_BIT(I2C1->SR1, I2C_SR1_TXE) && timeout--);
+        if(timeout == 0) {
+            SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+            error_counter++;
+            return 0;
+        }
     }
     SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+    return 1;
 }
 
-void I2C_ReadData(uint8_t addr, uint8_t *buf, uint16_t bytes_count) {
+uint8_t I2C_ReadData(uint8_t addr, uint8_t *buf, uint16_t bytes_count) {
     uint16_t i;
+    uint32_t timeout;
+    
     CLEAR_BIT(I2C1->CR1, I2C_CR1_POS);
     SET_BIT(I2C1->CR1, I2C_CR1_ACK);
     SET_BIT(I2C1->CR1, I2C_CR1_START);
     
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_SB));
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_SB) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     (void) I2C1->SR1;
     
     I2C1->DR = SLAVE_OWN_ADDRESS | I2C_REQUEST_WRITE;
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR));
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     (void) I2C1->SR1;
     (void) I2C1->SR2;
     
     I2C1->DR = LM75B_Temp;
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_TXE)){}
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_TXE) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     
     SET_BIT(I2C1->CR1, I2C_CR1_START);
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_SB));
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_SB) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     (void) I2C1->SR1;
     
     I2C1->DR = SLAVE_OWN_ADDRESS | I2C_REQUEST_READ;
-    while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR));
+    timeout = I2C_TIMEOUT;
+    while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR) && timeout--);
+    if(timeout == 0) {
+        SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+        error_counter++;
+        return 0;
+    }
     (void) I2C1->SR1;
     (void) I2C1->SR2;
     
     for(i = 0; i < bytes_count; i++) {
         if(i < (bytes_count-1)) {
-            while(!READ_BIT(I2C1->SR1, I2C_SR1_RXNE)){}
+            timeout = I2C_TIMEOUT;
+            while(!READ_BIT(I2C1->SR1, I2C_SR1_RXNE) && timeout--);
+            if(timeout == 0) {
+                SET_BIT(I2C1->CR1, I2C_CR1_STOP);
+                error_counter++;
+                return 0;
+            }
             buf[i] = READ_BIT(I2C1->DR, I2C_DR_DR);
         } else {
             CLEAR_BIT(I2C1->CR1, I2C_CR1_ACK);
             SET_BIT(I2C1->CR1, I2C_CR1_STOP);
-            while(!READ_BIT(I2C1->SR1, I2C_SR1_RXNE)){}
+            timeout = I2C_TIMEOUT;
+            while(!READ_BIT(I2C1->SR1, I2C_SR1_RXNE) && timeout--);
+            if(timeout == 0) {
+                error_counter++;
+                return 0;
+            }
             buf[i] = READ_BIT(I2C1->DR, I2C_DR_DR);
         }
     }
+    return 1;
 }
 
 uint8_t I2C_IsDeviceReady(uint8_t devAddr) {
-    uint32_t timeout = 10000;
+    uint32_t timeout = I2C_TIMEOUT;
     uint8_t ready = 0;
     
     I2C1->SR1 &= ~(I2C_SR1_AF | I2C_SR1_BERR | I2C_SR1_ARLO | I2C_SR1_OVR);
@@ -149,7 +249,7 @@ uint8_t I2C_IsDeviceReady(uint8_t devAddr) {
     
     I2C1->DR = (devAddr << 1) | I2C_REQUEST_WRITE;
     
-    timeout = 5000;
+    timeout = I2C_TIMEOUT / 10;
     while(!READ_BIT(I2C1->SR1, I2C_SR1_ADDR) && !READ_BIT(I2C1->SR1, I2C_SR1_AF) && timeout--);
     
     if(READ_BIT(I2C1->SR1, I2C_SR1_ADDR)) {
@@ -158,20 +258,27 @@ uint8_t I2C_IsDeviceReady(uint8_t devAddr) {
     }
     
     SET_BIT(I2C1->CR1, I2C_CR1_STOP);
-    
     I2C1->SR1 &= ~(I2C_SR1_AF | I2C_SR1_BERR | I2C_SR1_ARLO);
     
     return ready;
 }
 
-uint8_t LM75A_CheckAnyDevice(void) {
+uint8_t CheckAnyDevice(void) {
     uint8_t addr;
+    static uint8_t reset_pending = 0;
+    
+    if(error_counter > 20) {
+        I2C_Reset();
+        for(volatile int i = 0; i < 10000; i++);
+    }
     
     for(addr = LM75A_ADDR_START; addr <= LM75A_ADDR_END; addr++) {
         if(I2C_IsDeviceReady(addr)) {
+            error_counter = 0; 
             return addr;
         }
     }
+		error_counter++;
     return 0;
 }
 
@@ -184,11 +291,24 @@ uint8_t LM75A_ReadTemperature(uint8_t addr, float *temp) {
         return 0;
     }
     
-    I2C_WriteData(addr, write_data, 1);
+    if(!I2C_IsDeviceReady(addr)) {
+        return 0;
+    }
+    
+    if(!I2C_WriteData(addr, write_data, 1)) {
+        return 0;
+    }
     Delay_US(1);
     
-    I2C_ReadData(addr, read_data, 2);
+    if(!I2C_ReadData(addr, read_data, 2)) {
+        return 0;
+    }
+    
     received_data = (read_data[0] << 8) | read_data[1];
+    
+    if((received_data == 0xFFFF) || (received_data == 0x0000)) {
+        return 0;
+    }
     
     if(received_data & 0x8000) {
         *temp = (float)((int16_t)received_data) / 256.0f;
@@ -196,37 +316,16 @@ uint8_t LM75A_ReadTemperature(uint8_t addr, float *temp) {
         *temp = (float)received_data / 256.0f;
     }
     
+    if(*temp < -55.0f || *temp > 125.0f) {
+        return 0;
+    }
+    
     return 1;
 }
 
-void LM75A_SetTos(uint8_t addr, float tos) {
-    uint8_t write_buf[2];
-    uint8_t tos_byte = (uint8_t)(tos * 2);
-    
-    write_buf[0] = LM75B_Tos;
-    write_buf[1] = tos_byte;
-    I2C_WriteData(addr, write_buf, 2);
-}
-
-void LM75A_SetThyst(uint8_t addr, float thyst) {
-    uint8_t write_buf[2];
-    uint8_t thyst_byte = (uint8_t)(thyst * 2);
-    
-    write_buf[0] = LM75B_Thyst;
-    write_buf[1] = thyst_byte;
-    I2C_WriteData(addr, write_buf, 2);
-}
-
-float LM75A_GetTos(uint8_t addr) {
-    uint8_t read_buf[2];
-    I2C_ReadData(addr, read_buf, 2);
-    return (float)((read_buf[0] << 8) | read_buf[1]) / 256.0f;
-}
-
-float LM75A_GetThyst(uint8_t addr) {
-    uint8_t read_buf[2];
-    uint8_t reg = LM75B_Thyst;
-    I2C_WriteData(addr, &reg, 1);
-    I2C_ReadData(addr, read_buf, 2);
-    return (float)((read_buf[0] << 8) | read_buf[1]) / 256.0f;
+uint8_t LM75A_IsConnected(uint8_t addr) {
+    if(addr < LM75A_ADDR_START || addr > LM75A_ADDR_END) {
+        return 0;
+    }
+    return I2C_IsDeviceReady(addr);
 }

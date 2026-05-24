@@ -25,12 +25,15 @@ typedef struct {
     uint8_t present;
 } LM75A_Sensor;
 
+extern volatile uint32_t error_counter;
+
 void I2C_Init(void);
 void I2C_Reset(void);
-void I2C_WriteData(uint8_t addr, uint8_t *buf, uint16_t bytes_count);
-void I2C_ReadData(uint8_t addr, uint8_t *buf, uint16_t bytes_count);
+uint8_t I2C_WriteData(uint8_t addr, uint8_t *buf, uint16_t bytes_count);
+uint8_t I2C_ReadData(uint8_t addr, uint8_t *buf, uint16_t bytes_count);
 uint8_t I2C_IsDeviceReady(uint8_t devAddr);
 uint8_t LM75A_CheckAnyDevice(void);
 uint8_t LM75A_ReadTemperature(uint8_t addr, float *temp);
+uint8_t LM75A_IsConnected(uint8_t addr);
 
 #endif // LM75A_H

@@ -1,5 +1,7 @@
 #include "ds18b20.h"
 
+volatile uint32_t msTicks;
+
 void ds18b20_PortInit(void) {
     RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
     GPIOB->CRH |= GPIO_CRH_MODE11;

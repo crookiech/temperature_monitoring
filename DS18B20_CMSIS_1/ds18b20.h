@@ -13,6 +13,7 @@
 #define COPY_SCRATCHPAD     0x48
 #define RECALL_EEPROM       0xB8
 #define READ_POWER_SUPPLY   0xB4
+
 #define RESOLUTION_9BIT     0x1F 
 #define RESOLUTION_10BIT    0x3F
 #define RESOLUTION_11BIT    0x5F
@@ -29,6 +30,11 @@ typedef struct {
     uint8_t crc8_data_error;
 } Sensor;
 
+extern volatile uint32_t msTicks;
+
+void SysTick_Handler(void);
+void DelayM(uint32_t dlyTicks);
+
 void ds18b20_PortInit(void);
 uint8_t ds18b20_Reset(void);
 uint8_t ds18b20_ReadBit(void);
@@ -42,6 +48,7 @@ void ds18b20_ReadStratchpad(uint8_t mode, uint8_t *Data, uint8_t* address);
 void ds18b20_ReadROM(uint8_t *Data);
 uint8_t Compute_CRC8(uint8_t* data, uint8_t length);
 uint8_t Search_ROM(char command, Sensor *sensors);
+
 void ds18b20_ReadConfig(uint8_t mode, uint8_t* address, uint8_t* th, uint8_t* tl, uint8_t* config);
 void ds18b20_SetConfig(uint8_t mode, uint8_t* address, uint8_t th, uint8_t tl, uint8_t resolution);
 void ds18b20_CopyScratchpad(uint8_t mode, uint8_t* address);
